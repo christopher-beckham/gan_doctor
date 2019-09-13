@@ -25,8 +25,8 @@ except:
 # and a function which may optionally shorten the value.
 id_ = lambda x: str(x)
 KWARGS_FOR_NAME = {
-    'gan': ('gan', id_),
-    'dataset': ('ds', id_),
+    'gan': ('gan', lambda x: os.path.basename(x)),
+    'dataset': ('ds', lambda x: os.path.basename(x)),
     'network': ('net', lambda x: os.path.basename(x)),
     'batch_size': ('bs', id_),
     'n_channels': ('nc', id_),
@@ -130,7 +130,6 @@ if __name__ == '__main__':
                         batch_size=args['batch_size'])
 
     from handlers import fid_handler
-
 
     # TODO: support different optim flags
     # for opt_g and opt_d

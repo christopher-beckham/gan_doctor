@@ -2,6 +2,7 @@ import torch
 import os
 import time
 import numpy as np
+import json
 from tqdm import tqdm
 from collections import OrderedDict
 from torch import optim
@@ -107,12 +108,12 @@ class GAN:
         for folder_name in [model_dir, result_dir]:
             if folder_name is not None and not os.path.exists(folder_name):
                 os.makedirs(folder_name)
-        f_mode = 'w' if not os.path.exists("%s/results.txt" % result_dir) else 'a'
+        f_mode = 'w' if not os.path.exists("%s/results.json" % result_dir) else 'a'
         if val_batch_size is None:
             val_batch_size = itr.batch_size
         f = None
         if result_dir is not None:
-            f = open("%s/results.txt" % result_dir, f_mode)
+            f = open("%s/results.json" % result_dir, f_mode)
         for epoch in range(self.last_epoch, epochs):
             # Training
             epoch_start_time = time.time()
@@ -155,12 +156,8 @@ class GAN:
                     self.optim[key].state_dict()['param_groups'][0]['lr']
             all_dict['time'] = \
                 time.time() - epoch_start_time
-            str_ = ",".join([str(all_dict[key]) for key in all_dict])
-            print(str_)
+            str_ = json.dumps(all_dict)
             if f is not None:
-                if (epoch+1) == 1:
-                    # If we're not resuming, then write the header.
-                    f.write(",".join(all_dict.keys()) + "\n")
                 f.write(str_ + "\n")
                 f.flush()
             if (epoch+1) % save_every == 0 and model_dir is not None:
