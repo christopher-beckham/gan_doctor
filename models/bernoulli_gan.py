@@ -7,9 +7,14 @@ from utils import bce_loss
 
 class GAN(RegularGAN):
 
+    REQUIRED_ARGS = {
+        'p': {'desc': 'Bernoulli parameter p',
+              'default': 0.5}
+    }
+
     def __init__(self, *args, **kwargs):
         super(GAN, self).__init__(*args, **kwargs)
-        self.p = 0.5
+        self._validate(**kwargs)
 
     def sample_z(self, bs, seed=None):
         """Return a sample z ~ p(z)"""

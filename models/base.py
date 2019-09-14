@@ -12,6 +12,9 @@ from torchvision.utils import save_image
 from itertools import chain
 
 class GAN:
+
+    REQUIRED_ARGS = {}
+
     """
     Base model for GAN models
     """
@@ -19,7 +22,6 @@ class GAN:
                  gen_fn,
                  disc_fn,
                  z_dim,
-                 lamb=0.,
                  opt_g=optim.Adam,
                  opt_d=optim.Adam,
                  opt_d_args={'lr': 0.0002, 'betas': (0.5, 0.999)},
@@ -36,8 +38,7 @@ class GAN:
         self.update_g_every = update_g_every
         self.g = gen_fn
         self.d = disc_fn
-        self.lamb = lamb
-        self.beta = 0.0
+
         optim_g = opt_g(filter(lambda p: p.requires_grad,
                                self.g.parameters()), **opt_g_args)
         optim_d = opt_d(filter(lambda p: p.requires_grad,
@@ -58,6 +59,15 @@ class GAN:
             self.g.cuda()
             self.d.cuda()
         self.last_epoch = 0
+
+    def _validate(self, **kwargs):
+        R = self.REQUIRED_ARGS
+        for key in self.REQUIRED_ARGS:
+            kw = kwargs.pop(key, R[key]['default'])
+            if kw is None:
+                raise Exception(("This class requires kwarg: %s " +
+                                "(description: %s)") % (key, R[key]['desc']))
+            setattr(self, key, kw)
 
     def _get_stats(self, dict_, mode):
         stats = OrderedDict({})

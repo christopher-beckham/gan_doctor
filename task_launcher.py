@@ -129,7 +129,8 @@ if __name__ == '__main__':
                         shuffle=True,
                         batch_size=args['batch_size'])
 
-    from handlers import fid_handler
+    from handlers import (fid_handler,
+                          dump_img_handler)
 
     # TODO: support different optim flags
     # for opt_g and opt_d
@@ -156,6 +157,11 @@ if __name__ == '__main__':
         fid_handler(gan,
                     cls=None,
                     loader=loader_handler)
+    )
+    handlers.append(
+        dump_img_handler(gan,
+                         batch_size=args['val_batch_size'],
+                         dest_dir="%s/%s" % (save_path, name))
     )
 
     if args['resume'] is not None:
