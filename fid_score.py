@@ -18,6 +18,7 @@ See --help to see further details.
 Code apapted from https://github.com/bioinf-jku/TTUR to use PyTorch instead
 of Tensorflow
 
+Copyright 2018 'mseitzer' (Github handle)
 Copyright 2018 Institute of Bioinformatics, JKU Linz
 
 Licensed under the Apache License, Version 2.0 (the "License");
