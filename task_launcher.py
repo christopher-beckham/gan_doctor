@@ -65,7 +65,7 @@ if __name__ == '__main__':
         parser.add_argument('--beta2', type=float, default=0.999)
         parser.add_argument('--update_g_every', type=int, default=1)
         parser.add_argument('--dataset', type=str, default="iterators/cifar10.py")
-        parser.add_argument('--resume', type=str, default=None)
+        parser.add_argument('--resume', type=str, default='auto')
         parser.add_argument('--network', type=str, default="networks/mnist.py")
         parser.add_argument('--save_path', type=str, default='./results')
         parser.add_argument('--save_images_every', type=int, default=100)
@@ -178,7 +178,7 @@ if __name__ == '__main__':
     if args['resume'] is not None:
         if args['resume'] == 'auto':
             # autoresume
-            model_dir = "%s/%s/models" % (args['save_path'], args['name'])
+            model_dir = "%s/%s" % (args['save_path'], args['name'])
             latest_model = find_latest_pkl_in_folder(model_dir)
             if latest_model is not None:
                 gan.load(latest_model)
