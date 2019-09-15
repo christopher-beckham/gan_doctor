@@ -8,13 +8,19 @@ from utils import bce_loss
 class GAN(RegularGAN):
 
     REQUIRED_ARGS = {
-        'p': {'desc': 'Bernoulli parameter p',
-              'default': 0.5}
+        'p': {
+            'desc': 'Bernoulli parameter p',
+            'default': 0.5
+        },
+        'center': {
+            'desc': 'Center sampled values to lie in range {-1, 1}, rather than {0, 1}',
+            'default': False
+        }
     }
 
     def __init__(self, *args, **kwargs):
+        self._validate(kwargs)
         super(GAN, self).__init__(*args, **kwargs)
-        self._validate(**kwargs)
 
     def sample_z(self, bs, seed=None):
         """Return a sample z ~ p(z)"""
@@ -27,6 +33,8 @@ class GAN(RegularGAN):
             z = torch.from_numpy(
                 np.random.binomial(1, self.p, size=(bs, self.z_dim))
             ).float()
+        if self.center:
+            z = (z - 0.5) / 0.5
         if self.use_cuda:
             z = z.cuda()
         return z

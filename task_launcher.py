@@ -24,8 +24,14 @@ except:
 # shortened version of the key (e.g. 'dataset' -> 'ds')
 # and a function which may optionally shorten the value.
 id_ = lambda x: str(x)
+dict2line = lambda x: x.replace(" ", "").\
+    replace('"', '').\
+    replace("'", "").\
+    replace(":", "=").\
+    replace(",", ";")
 KWARGS_FOR_NAME = {
     'gan': ('gan', lambda x: os.path.basename(x)),
+    'gan_args': ('gan_args', dict2line),
     'dataset': ('ds', lambda x: os.path.basename(x)),
     'network': ('net', lambda x: os.path.basename(x)),
     'batch_size': ('bs', id_),
@@ -49,6 +55,7 @@ if __name__ == '__main__':
         parser.add_argument('--name', type=str, default=None)
         parser.add_argument('--trial_id', type=str, default=None)
         parser.add_argument('--gan', type=str, default="models/gan.py")
+        parser.add_argument('--gan_args', type=str, default=None)
         parser.add_argument('--batch_size', type=int, default=32)
         parser.add_argument('--epochs', type=int, default=100)
         parser.add_argument('--loss', type=str, default='jsgan')
@@ -106,6 +113,7 @@ if __name__ == '__main__':
     else:
         save_path = "%s/s%i/%s" % (args['save_path'], args['seed'], args['name'])
 
+    # TODO: also add gan class specific args to this too...
     name = generate_name_from_args(args, KWARGS_FOR_NAME)
     print("Auto-generated experiment name: %s" % name)
     print("Save path: %s" % save_path)
@@ -146,6 +154,9 @@ if __name__ == '__main__':
                        'betas': (args['beta1'], args['beta2'])},
         'handlers': handlers
     }
+    if args['gan_args'] is not None:
+        gan_kwargs_from_args = eval(args['gan_args'])
+        gan_kwargs.update(gan_kwargs_from_args)
     gan = gan_class(**gan_kwargs)
 
     loader_handler = DataLoader(

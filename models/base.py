@@ -60,7 +60,7 @@ class GAN:
             self.d.cuda()
         self.last_epoch = 0
 
-    def _validate(self, **kwargs):
+    def _validate(self, kwargs):
         R = self.REQUIRED_ARGS
         for key in self.REQUIRED_ARGS:
             kw = kwargs.pop(key, R[key]['default'])
