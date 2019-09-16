@@ -10,6 +10,9 @@ from importlib import import_module
 from torch.utils.data import DataLoader
 from utils import (generate_name_from_args,
                    find_latest_pkl_in_folder)
+from handlers import (fid_handler,
+                      is_handler,
+                      dump_img_handler)
 
 use_shuriken = False
 try:
@@ -137,8 +140,6 @@ if __name__ == '__main__':
                         shuffle=True,
                         batch_size=args['batch_size'])
 
-    from handlers import (fid_handler,
-                          dump_img_handler)
 
     # TODO: support different optim flags
     # for opt_g and opt_d
@@ -165,15 +166,26 @@ if __name__ == '__main__':
         batch_size=args['val_batch_size']
     )
     handlers.append(
+        is_handler(gan,
+                   batch_size=args['val_batch_size'],
+                   loader=loader_handler)
+    )
+
+    handlers.append(
         fid_handler(gan,
                     cls=None,
+                    batch_size=args['val_batch_size'],
                     loader=loader_handler)
     )
+
     handlers.append(
         dump_img_handler(gan,
                          batch_size=args['val_batch_size'],
                          dest_dir="%s/%s" % (save_path, name))
     )
+
+    print("List of handlers:")
+    print(handlers)
 
     if args['resume'] is not None:
         if args['resume'] == 'auto':

@@ -90,6 +90,31 @@ def dump_samples_to_disk(folder, how_many, bs):
         imsave(arr=img.swapaxes(0,1).swapaxes(1,2),
                fname="%s/%i.png" % (folder,i))
 
+def _extract_loader(loader):
+    '''Extract images from data loader and de-norm them
+    and convert into int32.'''
+    train_samples = []
+    for x_batch, _ in loader:
+        train_samples.append(x_batch)
+    train_samples = np.vstack(train_samples)
+    train_samples = (((train_samples*0.5) + 0.5)*255.).astype(np.int32)
+    return train_samples
+
+def _extract_samples(gan, batch_size, how_many, verbose=False):
+    '''Extract images from the GAN, and de-norm them
+    and convert into int32.
+    '''
+    n_batches = int(np.ceil(how_many / batch_size))
+    gen_samples = []
+    for _ in range(n_batches):
+        if verbose:
+            print("iter: ", (_+1), "/", n_batches)
+        gen_samples.append(gan.sample(batch_size))
+    gen_samples = torch.cat(gen_samples, dim=0)[0:how_many].cpu().numpy()
+    #gen_samples = gen_samples*0.5 + 0.5
+    #gen_samples = (((gen_samples*0.5) + 0.5)*255.).astype(np.int32)
+    return gen_samples
+
 def compute_fid(loader,
                 gan,
                 batch_size,
@@ -98,27 +123,18 @@ def compute_fid(loader,
                 verbose=False):
 
     # Collect the training set.
-    train_samples = []
-    gen_samples = []
-    for x_batch, _ in loader:
-        train_samples.append(x_batch)
-    train_samples = np.vstack(train_samples)
-    train_samples = (((train_samples*0.5) + 0.5)*255.).astype(np.int32)
 
+    train_samples = _extract_loader(loader)
     use_cuda = gan.use_cuda
     scores = []
     for iter_ in range(num_repeats):
 
-        print("bs", batch_size)
-
-        gen_samples = []
-        n_batches = int(np.ceil(len(train_samples) / batch_size))
-        for _ in range(n_batches):
-            if verbose:
-                print("iter: ", (_+1), "/", n_batches)
-            gen_samples.append(gan.sample(batch_size))
-        gen_samples = torch.cat(gen_samples, dim=0)[0:len(train_samples)].cpu().numpy()
-        gen_samples = (((gen_samples*0.5) + 0.5)*255.).astype(np.int32)
+        gen_samples = _extract_samples(gan,
+                                       batch_size,
+                                       how_many=len(train_samples))
+        # The method in fid_score.py expects the images to be in
+        # [0,1], so scale it here.
+        gen_samples = gen_samples*0.5 + 0.5
 
         score = calculate_fid_given_imgs(imgs1=train_samples,
                                          imgs2=gen_samples,
@@ -129,4 +145,30 @@ def compute_fid(loader,
     return {
         'fid_mean': np.mean(scores),
         'fid_std': np.std(scores)
+    }
+
+
+def compute_is(loader,
+               gan,
+               batch_size):
+
+    import inception_score
+
+    train_samples = _extract_loader(loader)
+    gen_samples = _extract_samples(gan,
+                                   batch_size,
+                                   how_many=len(train_samples))
+    # The method in inception_score.py expects the images to be
+    # in [-1, 1], so no need to scale here.
+
+    score_mu, score_std = inception_score.inception_score(
+        imgs=gen_samples,
+        batch_size=batch_size,
+        resize=True,
+        splits=10
+    )
+    #print("PyTorch Inception score: %f +/- %f" % (score_mu, score_std))
+    return {
+        'is_mean': np.mean(score_mu),
+        'is_std': np.std(score_std)
     }

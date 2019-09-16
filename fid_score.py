@@ -250,14 +250,10 @@ def calculate_fid_given_paths(paths, batch_size, cuda, dims):
 #####################
 
 def _compute_statistics_of_imgs(imgs, model, batch_size, dims, cuda):
+    '''
+    imgs: [0,1], np.float32
 
-    imgs = imgs.astype(np.float32)
-    
-    # Bring images to shape (B, 3, H, W)
-    #imgs = imgs.transpose((0, 3, 1, 2))
-
-    # Rescale images to be between 0 and 1
-    imgs /= 255
+    '''
 
     m, s = calculate_activation_statistics(imgs, model, batch_size,
                                            dims, cuda)
