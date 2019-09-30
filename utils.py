@@ -37,6 +37,23 @@ def is_int(x):
     except ValueError:
         return False
 
+def count_params(module, trainable_only=True):
+    """Count the number of parameters in a
+    module.
+
+    :param module: PyTorch module
+    :param trainable_only: only count trainable
+      parameters.
+    :returns: number of parameters
+    :rtype:
+
+    """
+    parameters = module.parameters()
+    if trainable_only:
+        parameters = filter(lambda p: p.requires_grad, parameters)
+    num = sum([np.prod(p.size()) for p in parameters])
+    return num
+
 def generate_name_from_args(dd, kwargs_for_name):
     buf = {}
     for key in dd:
@@ -97,75 +114,72 @@ def _extract_loader(loader):
     for x_batch, _ in loader:
         train_samples.append(x_batch)
     train_samples = np.vstack(train_samples)
-    train_samples = (((train_samples*0.5) + 0.5)*255.).astype(np.int32)
     return train_samples
 
-def _extract_samples(gan, batch_size, how_many, verbose=False):
+def _extract_samples(gan, batch_size, n_samples, verbose=False):
     '''Extract images from the GAN, and de-norm them
     and convert into int32.
     '''
-    n_batches = int(np.ceil(how_many / batch_size))
+    n_batches = int(np.ceil(n_samples / batch_size))
     gen_samples = []
     for _ in range(n_batches):
         if verbose:
             print("iter: ", (_+1), "/", n_batches)
-        gen_samples.append(gan.sample(batch_size))
-    gen_samples = torch.cat(gen_samples, dim=0)[0:how_many].cpu().numpy()
+        samples = gan.sample(batch_size)
+        if type(samples) == list:
+            samples = samples[-1]
+        gen_samples.append(samples.cpu())
+    gen_samples = torch.cat(gen_samples, dim=0)[0:n_samples].numpy()
     #gen_samples = gen_samples*0.5 + 0.5
     #gen_samples = (((gen_samples*0.5) + 0.5)*255.).astype(np.int32)
     return gen_samples
 
-def compute_fid(loader,
+def compute_fid(train_samples,
                 gan,
                 batch_size,
                 cls,
-                num_repeats=1,
                 verbose=False):
 
-    # Collect the training set.
-
-    train_samples = _extract_loader(loader)
     use_cuda = gan.use_cuda
-    scores = []
-    for iter_ in range(num_repeats):
 
-        gen_samples = _extract_samples(gan,
-                                       batch_size,
-                                       how_many=len(train_samples))
-        # The method in fid_score.py expects the images to be in
-        # [0,1], so scale it here.
-        gen_samples = gen_samples*0.5 + 0.5
+    gen_samples = _extract_samples(gan,
+                                   batch_size,
+                                   n_samples=len(train_samples))
+    # The method in fid_score.py expects the images to be in
+    # [0,1], so scale it here.
+    gen_samples = gen_samples*0.5 + 0.5
 
-        score = calculate_fid_given_imgs(imgs1=train_samples,
-                                         imgs2=gen_samples,
-                                         batch_size=batch_size,
-                                         cuda=use_cuda,
-                                         model=cls)
-        scores.append(score)
+    score = calculate_fid_given_imgs(imgs1=train_samples,
+                                     imgs2=gen_samples,
+                                     batch_size=batch_size,
+                                     cuda=use_cuda,
+                                     model=cls)
     return {
-        'fid_mean': np.mean(scores),
-        'fid_std': np.std(scores)
+        'fid_mean': np.mean(score)
     }
 
 
-def compute_is(loader,
+def compute_is(n_samples,
                gan,
                batch_size):
 
     import inception_score
 
-    train_samples = _extract_loader(loader)
     gen_samples = _extract_samples(gan,
                                    batch_size,
-                                   how_many=len(train_samples))
+                                   n_samples=n_samples)
+
     # The method in inception_score.py expects the images to be
     # in [-1, 1], so no need to scale here.
+
+    print("foo")
 
     score_mu, score_std = inception_score.inception_score(
         imgs=gen_samples,
         batch_size=batch_size,
         resize=True,
-        splits=10
+        splits=10,
+        pbar=True
     )
     #print("PyTorch Inception score: %f +/- %f" % (score_mu, score_std))
     return {

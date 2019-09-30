@@ -45,6 +45,7 @@ from torch.nn.functional import adaptive_avg_pool2d
 
 from inception import InceptionV3
 
+from tqdm import tqdm
 
 parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
 parser.add_argument('path', type=str, nargs=2,
@@ -92,10 +93,14 @@ def get_activations(images, model, batch_size=64, dims=2048,
     n_used_imgs = n_batches * batch_size
 
     pred_arr = np.empty((n_used_imgs, dims))
+    if verbose:
+        pbar = tqdm(total=n_batches)
+        pbar.set_postfix({'computing': 'fid'})
     for i in range(n_batches):
         if verbose:
-            print('\rPropagating batch %d/%d' % (i + 1, n_batches),
-                  end='', flush=True)
+            #print('\rPropagating batch %d/%d' % (i + 1, n_batches),
+            #      end='', flush=True)
+            pbar.update(1)
         start = i * batch_size
         end = start + batch_size
 
@@ -114,7 +119,8 @@ def get_activations(images, model, batch_size=64, dims=2048,
         pred_arr[start:end] = pred.cpu().data.numpy().reshape(batch_size, -1)
 
     if verbose:
-        print(' done')
+        #print(' done')
+        pbar.close()
 
     return pred_arr
 
@@ -249,17 +255,6 @@ def calculate_fid_given_paths(paths, batch_size, cuda, dims):
 # Added by Chris B. #
 #####################
 
-def _compute_statistics_of_imgs(imgs, model, batch_size, dims, cuda):
-    '''
-    imgs: [0,1], np.float32
-
-    '''
-
-    m, s = calculate_activation_statistics(imgs, model, batch_size,
-                                           dims, cuda)
-
-    return m, s
-
 def calculate_fid_given_imgs(imgs1, imgs2, batch_size, cuda, dims=2048, model=None):
     """
     Calculates the FID of two sets of images.
@@ -275,10 +270,10 @@ def calculate_fid_given_imgs(imgs1, imgs2, batch_size, cuda, dims=2048, model=No
         if cuda:
             model = model.cuda()
 
-    m1, s1 = _compute_statistics_of_imgs(imgs1, model, batch_size,
-                                         dims, cuda)
-    m2, s2 = _compute_statistics_of_imgs(imgs2, model, batch_size,
-                                         dims, cuda)
+    m1, s1 = calculate_activation_statistics(imgs1, model, batch_size,
+                                             dims, cuda, verbose=False)
+    m2, s2 = calculate_activation_statistics(imgs2, model, batch_size,
+                                             dims, cuda, verbose=True)
     fid_value = calculate_frechet_distance(m1, s1, m2, s2)
 
     return fid_value

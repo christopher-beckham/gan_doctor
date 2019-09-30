@@ -9,7 +9,8 @@ from skimage.io import imsave
 from importlib import import_module
 from torch.utils.data import DataLoader
 from utils import (generate_name_from_args,
-                   find_latest_pkl_in_folder)
+                   find_latest_pkl_in_folder,
+                   count_params)
 from handlers import (fid_handler,
                       is_handler,
                       dump_img_handler)
@@ -30,7 +31,6 @@ id_ = lambda x: str(x)
 dict2line = lambda x: x.replace(" ", "").\
     replace('"', '').\
     replace("'", "").\
-    replace(":", "=").\
     replace(",", ";")
 KWARGS_FOR_NAME = {
     'gan': ('gan', lambda x: os.path.basename(x)),
@@ -39,9 +39,12 @@ KWARGS_FOR_NAME = {
     'network': ('net', lambda x: os.path.basename(x)),
     'batch_size': ('bs', id_),
     'n_channels': ('nc', id_),
+    'img_size': ('sz', id_),
     'ngf': ('ngf', id_),
     'ndf': ('ndf', id_),
-    'lr': ('lr', id_),
+    'lr_g': ('lr_g', id_),
+    'lr_d': ('lr_d', id_),
+    'z_dim': ('z', id_),
     'update_g_every': ('g', id_),
     'beta1': ('b1', id_),
     'beta2': ('b2', id_),
@@ -60,10 +63,12 @@ if __name__ == '__main__':
         parser.add_argument('--gan', type=str, default="models/gan.py")
         parser.add_argument('--gan_args', type=str, default=None)
         parser.add_argument('--batch_size', type=int, default=32)
+        parser.add_argument('--img_size', type=int, default=32)
         parser.add_argument('--epochs', type=int, default=100)
         parser.add_argument('--loss', type=str, default='jsgan')
         parser.add_argument('--z_dim', type=int, default=62)
-        parser.add_argument('--lr', type=float, default=2e-4)
+        parser.add_argument('--lr_g', type=float, default=2e-4)
+        parser.add_argument('--lr_d', type=float, default=2e-4)
         parser.add_argument('--beta1', type=float, default=0.5)
         parser.add_argument('--beta2', type=float, default=0.999)
         parser.add_argument('--update_g_every', type=int, default=1)
@@ -74,6 +79,9 @@ if __name__ == '__main__':
         parser.add_argument('--save_images_every', type=int, default=100)
         parser.add_argument('--save_every', type=int, default=10)
         parser.add_argument('--val_batch_size', type=int, default=512)
+        parser.add_argument('--num_workers', type=int, default=4)
+        parser.add_argument('--compute_is_every', type=int, default=0)
+        parser.add_argument('--n_samples_is', type=int, default=50000)
         parser.add_argument('--seed', type=int, default=0)
         parser.add_argument('--mode', type=str, choices=['train', 'pdb'],
                             default='train')
@@ -94,6 +102,8 @@ if __name__ == '__main__':
         for key in shk_args:
             if shk_args[key] == '':
                 shk_args[key] = True
+            elif shk_args[key] == 'None':
+                shk_args[key] = None
         args.update(shk_args)
 
     if args['trial_id'] is None and 'SHK_TRIAL_ID' in os.environ:
@@ -129,16 +139,24 @@ if __name__ == '__main__':
                                replace(".py", ""))
     gen_fn, disc_fn = module_net.get_network(args['z_dim'])
 
+    print("Generator:")
+    print(gen_fn)
+    print("(%i params)" % count_params(gen_fn))
+    print("Discriminator:")
+    print(disc_fn)
+    print("(%i params)" % count_params(disc_fn))
+
     module_gan = import_module(args['gan'].replace("/", ".").\
                                replace(".py", ""))
     gan_class = module_gan.GAN
 
     module_dataset = import_module(args['dataset'].replace("/", ".").\
                                    replace(".py", ""))
-    dataset = module_dataset.get_dataset()
+    dataset = module_dataset.get_dataset(img_size=args['img_size'])
     loader = DataLoader(dataset,
                         shuffle=True,
-                        batch_size=args['batch_size'])
+                        batch_size=args['batch_size'],
+                        num_workers=args['num_workers'])
 
 
     # TODO: support different optim flags
@@ -149,9 +167,9 @@ if __name__ == '__main__':
         'disc_fn': disc_fn,
         'z_dim': args['z_dim'],
         'update_g_every': args['update_g_every'],
-        'opt_d_args': {'lr': args['lr'],
+        'opt_d_args': {'lr': args['lr_d'],
                        'betas': (args['beta1'], args['beta2'])},
-        'opt_g_args': {'lr': args['lr'],
+        'opt_g_args': {'lr': args['lr_g'],
                        'betas': (args['beta1'], args['beta2'])},
         'handlers': handlers
     }
@@ -165,18 +183,26 @@ if __name__ == '__main__':
         shuffle=True,
         batch_size=args['val_batch_size']
     )
-    handlers.append(
-        is_handler(gan,
-                   batch_size=args['val_batch_size'],
-                   loader=loader_handler)
-    )
 
-    handlers.append(
-        fid_handler(gan,
-                    cls=None,
-                    batch_size=args['val_batch_size'],
-                    loader=loader_handler)
-    )
+    if args['compute_is_every'] > 0:
+
+        print("IS/FID handler: bs=%i, n_samples=%i" % \
+              (args['val_batch_size'], args['n_samples_is']))
+        handlers.append(
+            is_handler(gan,
+                       batch_size=args['val_batch_size'],
+                       n_samples=args['n_samples_is'],
+                       eval_every=args['compute_is_every'])
+        )
+
+        handlers.append(
+            fid_handler(gan,
+                        cls=None,
+                        batch_size=args['val_batch_size'],
+                        n_samples=args['n_samples_is'],
+                        loader=loader_handler,
+                        eval_every=args['compute_is_every'])
+        )
 
     handlers.append(
         dump_img_handler(gan,
@@ -190,8 +216,7 @@ if __name__ == '__main__':
     if args['resume'] is not None:
         if args['resume'] == 'auto':
             # autoresume
-            model_dir = "%s/%s" % (args['save_path'], args['name'])
-            latest_model = find_latest_pkl_in_folder(model_dir)
+            latest_model = find_latest_pkl_in_folder("%s/%s" % (save_path, name))
             if latest_model is not None:
                 gan.load(latest_model)
         else:
