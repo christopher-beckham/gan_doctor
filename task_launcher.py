@@ -37,6 +37,7 @@ KWARGS_FOR_NAME = {
     'gan_args': ('gan_args', dict2line),
     'dataset': ('ds', lambda x: os.path.basename(x)),
     'network': ('net', lambda x: os.path.basename(x)),
+    'network_args': ('net_args', dict2line),
     'batch_size': ('bs', id_),
     'n_channels': ('nc', id_),
     'img_size': ('sz', id_),
@@ -65,7 +66,6 @@ if __name__ == '__main__':
         parser.add_argument('--batch_size', type=int, default=32)
         parser.add_argument('--img_size', type=int, default=32)
         parser.add_argument('--epochs', type=int, default=100)
-        parser.add_argument('--loss', type=str, default='jsgan')
         parser.add_argument('--z_dim', type=int, default=62)
         parser.add_argument('--lr_g', type=float, default=2e-4)
         parser.add_argument('--lr_d', type=float, default=2e-4)
@@ -75,6 +75,7 @@ if __name__ == '__main__':
         parser.add_argument('--dataset', type=str, default="iterators/cifar10.py")
         parser.add_argument('--resume', type=str, default='auto')
         parser.add_argument('--network', type=str, default="networks/mnist.py")
+        parser.add_argument('--network_args', type=str, default=None)
         parser.add_argument('--save_path', type=str, default='./results')
         parser.add_argument('--save_images_every', type=int, default=100)
         parser.add_argument('--save_every', type=int, default=10)
@@ -135,9 +136,15 @@ if __name__ == '__main__':
     if args['mode'] == 'train':
         torch.manual_seed(args['seed'])
 
+    if args['gan_args'] is not None:
+        gan_kwargs_from_args = eval(args['gan_args'])
+
     module_net = import_module(args['network'].replace("/", ".").\
                                replace(".py", ""))
-    gen_fn, disc_fn = module_net.get_network(args['z_dim'])
+    gen_fn, disc_fn = module_net.get_network(args['z_dim'],
+                                             gan_args=gan_kwargs_from_args,
+                                             **eval(args['network_args']))
+
 
     print("Generator:")
     print(gen_fn)
@@ -173,9 +180,9 @@ if __name__ == '__main__':
                        'betas': (args['beta1'], args['beta2'])},
         'handlers': handlers
     }
-    if args['gan_args'] is not None:
-        gan_kwargs_from_args = eval(args['gan_args'])
-        gan_kwargs.update(gan_kwargs_from_args)
+    #if args['gan_args'] is not None:
+    #    gan_kwargs_from_args = eval(args['gan_args'])
+    gan_kwargs.update(gan_kwargs_from_args)
     gan = gan_class(**gan_kwargs)
 
     loader_handler = DataLoader(

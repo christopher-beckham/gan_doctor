@@ -3,8 +3,10 @@ import torch as th
 from torch import nn
 import copy
 
+from torch.nn.utils import spectral_norm
+
 def norm(in_ch, norm_layer):
-    if norm_layer not in [None, 'batch', 'instance']:
+    if norm_layer not in [None, 'batch', 'instance', 'layer']:
         raise Exception("")
     if norm_layer == None:
         return lambda x: x
@@ -176,7 +178,7 @@ class MinibatchStdDev(th.nn.Module):
 class DisFinalBlock(th.nn.Module):
     """ Final block for the Discriminator """
 
-    def __init__(self, in_channels):
+    def __init__(self, in_channels, use_sn=False):
         """
         constructor of the class
         :param in_channels: number of input channels
@@ -186,15 +188,19 @@ class DisFinalBlock(th.nn.Module):
 
         super().__init__()
 
+        norm = lambda x: x
+        if use_sn:
+            norm = spectral_norm
+
         # declare the required modules for forward pass
         self.batch_discriminator = MinibatchStdDev()
 
         # modules required:
-        self.conv_1 = Conv2d(in_channels + 1, in_channels, (3, 3), padding=1, bias=True)
-        self.conv_2 = Conv2d(in_channels, in_channels, (4, 4), bias=True)
+        self.conv_1 = norm(Conv2d(in_channels + 1, in_channels, (3, 3), padding=1, bias=True))
+        self.conv_2 = norm(Conv2d(in_channels, in_channels, (4, 4), bias=True))
 
         # final conv layer emulates a fully connected layer
-        self.conv_3 = Conv2d(in_channels, 1, (1, 1), bias=True)
+        self.conv_3 = norm(Conv2d(in_channels, 1, (1, 1), bias=True))
 
         # leaky_relu:
         self.lrelu = LeakyReLU(0.2)
@@ -222,7 +228,7 @@ class DisFinalBlock(th.nn.Module):
 class DisGeneralConvBlock(th.nn.Module):
     """ General block in the discriminator  """
 
-    def __init__(self, in_channels, out_channels, dilation=1):
+    def __init__(self, in_channels, out_channels, dilation=1, use_sn=False):
         """
         constructor of the class
         :param in_channels: number of input channels
@@ -233,11 +239,15 @@ class DisGeneralConvBlock(th.nn.Module):
 
         super().__init__()
 
+        norm = lambda x: x
+        if use_sn:
+            norm = spectral_norm
+
         # convolutional modules
-        self.conv_1 = Conv2d(in_channels, in_channels, (3, 3),
-                             dilation=dilation, padding=dilation, bias=True)
-        self.conv_2 = Conv2d(in_channels, out_channels, (3, 3),
-                             dilation=dilation, padding=dilation, bias=True)
+        self.conv_1 = norm(Conv2d(in_channels, in_channels, (3, 3),
+                                  dilation=dilation, padding=dilation, bias=True))
+        self.conv_2 = norm(Conv2d(in_channels, out_channels, (3, 3),
+                                  dilation=dilation, padding=dilation, bias=True))
         self.downSampler = AvgPool2d(2)  # downsampler
 
         # leaky_relu:
