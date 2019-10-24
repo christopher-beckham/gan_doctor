@@ -5,7 +5,7 @@ from torch import nn
 from torch.nn.utils import spectral_norm
 
 def norm(in_ch, norm_layer):
-    if norm_layer not in [None, 'batch', 'instance']:
+    if norm_layer not in [None, 'batch', 'instance', 'pixel']:
         raise Exception("")
     if norm_layer == None:
         return lambda x: x
@@ -13,6 +13,8 @@ def norm(in_ch, norm_layer):
         return nn.BatchNorm2d(in_ch, affine=True)
     elif norm_layer == 'instance':
         return nn.InstanceNorm2d(in_ch, affine=True)
+    elif norm_layer == 'pixel':
+        return PixelwiseNorm()
 
 # ==========================================================
 # Equalized learning rate blocks:
@@ -212,11 +214,7 @@ class GenInitialBlock(th.nn.Module):
             self.conv_2 = Conv2d(in_channels, in_channels, (3, 3),
                                  padding=(1, 1), bias=True)
 
-        self.norm1 = norm(in_channels, norm_layer)
-        self.norm2 = norm(in_channels, norm_layer)
-
-        # pixel normalization vector:
-        self.pixNorm = PixelwiseNorm()
+        self.norm = norm(in_channels, norm_layer)
 
         # leaky_relu:
         self.lrelu = LeakyReLU(0.2)
@@ -232,11 +230,11 @@ class GenInitialBlock(th.nn.Module):
         # convolution operation
 
         # perform the forward computations:
-        y = self.lrelu(self.norm1(self.conv_1(y)))
-        y = self.lrelu(self.norm2(self.conv_2(y)))
+        y = self.lrelu(self.conv_1(y))
+        y = self.lrelu(self.conv_2(y))
 
         # apply the pixel normalization:
-        y = self.pixNorm(y)
+        y = self.norm(y)
 
         return y
 
@@ -270,11 +268,7 @@ class GenGeneralConvBlock(th.nn.Module):
             self.conv_2 = Conv2d(out_channels, out_channels, (3, 3),
                                  padding=1, bias=True)
 
-        self.norm1 = norm(out_channels, norm_layer)
-        self.norm2 = norm(out_channels, norm_layer)
-
-        # pixel_wise feature normalizer:
-        self.pixNorm = PixelwiseNorm()
+        self.norm = norm(out_channels, norm_layer)
 
         # leaky_relu:
         self.lrelu = LeakyReLU(0.2)
@@ -288,8 +282,8 @@ class GenGeneralConvBlock(th.nn.Module):
         from torch.nn.functional import interpolate
 
         y = interpolate(x, scale_factor=2)
-        y = self.pixNorm(self.lrelu(self.norm1(self.conv_1(y))))
-        y = self.pixNorm(self.lrelu(self.norm2(self.conv_2(y))))
+        y = self.norm(self.lrelu(self.conv_1(y)))
+        y = self.norm(self.lrelu(self.conv_2(y)))
 
         return y
 

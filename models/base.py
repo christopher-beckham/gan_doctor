@@ -64,8 +64,9 @@ class GAN:
         R = self.REQUIRED_ARGS
         for key in self.REQUIRED_ARGS:
             kw = kwargs.pop(key, R[key]['default'])
-            if kw not in R[key]["choices"]:
-                raise Exception("Illegal choice for kwarg %s" % key)
+            if type(kw) == str:
+                if kw not in R[key]["choices"]:
+                    raise Exception("Illegal choice for kwarg %s" % key)
             if kw is None:
                 raise Exception(("This class requires kwarg: %s " +
                                 "(description: %s)") % (key, R[key]['desc']))

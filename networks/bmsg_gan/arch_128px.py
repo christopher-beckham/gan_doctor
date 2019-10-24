@@ -11,16 +11,26 @@ def get_network(z_dim, gan_args, **net_kwargs):
     print("gan_args: %s" % gan_args)
     print("kwargs: %s" % net_kwargs)
 
+    # If we enable spectral norm, then we
+    # disable the equalised learning rate
+    # trick.
+    use_sn = net_kwargs.pop('use_sn', False)
+    if use_sn:
+        use_eql = False
+    else:
+        use_eql = True
+
     # This doesn't use spectral norm in either
     # of the networks.
-    gen = Generator(latent_size=z_dim, depth=6,
-                    norm_layer=net_kwargs['norm'])
-    use_sn_d = net_kwargs.pop('use_sn_d', False)
+    gen = Generator(latent_size=z_dim,
+                    depth=6,
+                    norm_layer=net_kwargs['g_norm'],
+                    use_eql=use_eql)
     disc = Discriminator(depth=6,
                          feature_size=z_dim,
                          sigm=True if gan_args['loss']=='bce' else False,
-                         use_sn=use_sn_d,
-                         use_eql=False if use_sn_d else True) # if sn is off, use eql
+                         use_sn=use_sn,
+                         use_eql=use_eql)
     return gen, disc
 
 if __name__ == '__main__':
