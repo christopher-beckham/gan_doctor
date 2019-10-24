@@ -14,6 +14,7 @@ from utils import (generate_name_from_args,
 from handlers import (fid_handler,
                       is_handler,
                       dump_img_handler)
+from torchvision.utils import save_image
 
 use_shuriken = False
 try:
@@ -61,6 +62,7 @@ if __name__ == '__main__':
         parser = argparse.ArgumentParser(description="")
         parser.add_argument('--name', type=str, default=None)
         parser.add_argument('--trial_id', type=str, default=None)
+        parser.add_argument('--find_matching_trial_id', action='store_true')
         parser.add_argument('--gan', type=str, default="models/gan.py")
         parser.add_argument('--gan_args', type=str, default=None)
         parser.add_argument('--batch_size', type=int, default=32)
@@ -76,13 +78,13 @@ if __name__ == '__main__':
         parser.add_argument('--resume', type=str, default='auto')
         parser.add_argument('--network', type=str, default="networks/mnist.py")
         parser.add_argument('--network_args', type=str, default=None)
-        parser.add_argument('--save_path', type=str, default='./results')
+        parser.add_argument('--save_path', type=str, default=None)
         parser.add_argument('--save_images_every', type=int, default=100)
         parser.add_argument('--save_every', type=int, default=10)
         parser.add_argument('--val_batch_size', type=int, default=512)
         parser.add_argument('--num_workers', type=int, default=4)
-        parser.add_argument('--compute_is_every', type=int, default=0)
-        parser.add_argument('--n_samples_is', type=int, default=50000)
+        parser.add_argument('--compute_is_every', type=int, default=1)
+        parser.add_argument('--n_samples_is', type=int, default=5000)
         parser.add_argument('--seed', type=int, default=0)
         parser.add_argument('--mode', type=str, choices=['train', 'pdb'],
                             default='train')
@@ -127,6 +129,38 @@ if __name__ == '__main__':
     else:
         save_path = "%s/s%i/%s" % (args['save_path'], args['seed'], args['name'])
 
+    if args['find_matching_trial_id']:
+        # If `find_matching_trial_id` is `True`, the experiment will try
+        # to find (in the folder `save_dir`) an experiment whose folder
+        # name is exactly the same, minus the `_trial=<id>` part. This
+        # is useful for when we need to resume an experiment after it has
+        # been terminated.
+        files = glob.glob(save_path+"/*")
+        files = sorted(files, key=os.path.getmtime)
+        kwargs_for_name_sans_trial = dict(KWARGS_FOR_NAME)
+        del kwargs_for_name_sans_trial['trial_id']
+        name_sans_trial = generate_name_from_args(args,
+                                                  kwargs_for_name_sans_trial)
+        for file_ in files:
+            file_ = os.path.basename(file_)
+            # If our experiment name is contained within one of the
+            # experiment names in this folder, break and steal its
+            # trial id.
+            if name_sans_trial in file_:
+                print("(Trial id hack) Found matching experiment: %s" \
+                      % file_)
+                new_trial_id = list(filter(lambda x: "_trial=" in x, file_.split(",")))[0]
+                new_trial_id = new_trial_id.split("=")[-1]
+                print("New trial ID is: %s" % new_trial_id)
+                args['trial_id'] = new_trial_id
+                break
+        # refactor:
+        if args['name'] is None:
+            save_path = "%s/s%i" % (args['save_path'], args['seed'])
+        else:
+            save_path = "%s/s%i/%s" % (args['save_path'], args['seed'], args['name'])
+
+
     # TODO: also add gan class specific args to this too...
     name = generate_name_from_args(args, KWARGS_FOR_NAME)
     print("Auto-generated experiment name: %s" % name)
@@ -166,6 +200,7 @@ if __name__ == '__main__':
                         num_workers=args['num_workers'])
 
 
+
     # TODO: support different optim flags
     # for opt_g and opt_d
     handlers = []
@@ -184,6 +219,12 @@ if __name__ == '__main__':
     #    gan_kwargs_from_args = eval(args['gan_args'])
     gan_kwargs.update(gan_kwargs_from_args)
     gan = gan_class(**gan_kwargs)
+
+    print("gen optim")
+    print(gan.optim['g'])
+
+    print("d optim")
+    print(gan.optim['d'])
 
     loader_handler = DataLoader(
         dataset,
@@ -219,6 +260,13 @@ if __name__ == '__main__':
 
     print("List of handlers:")
     print(handlers)
+
+    if not os.path.exists("%s/%s" % (save_path, name)):
+        os.makedirs("%s/%s" % (save_path, name))
+
+    # Dump some test images.
+    x, _ = iter(loader).next()
+    save_image(x*0.5 + 0.5, "%s/%s/samples.png" % (save_path, name))
 
     if args['resume'] is not None:
         if args['resume'] == 'auto':
