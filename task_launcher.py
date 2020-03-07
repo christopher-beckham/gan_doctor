@@ -164,12 +164,12 @@ if __name__ == '__main__':
 
         print("IS/FID handler: bs=%i, n_samples=%i" % \
               (args['val_batch_size'], args['n_samples_is']))
-        #handlers.append(
-        #    is_handler(gan,
-        #               batch_size=args['val_batch_size'],
-        #               n_samples=args['n_samples_is'],
-        #               eval_every=args['compute_is_every'])
-        #)
+        handlers.append(
+            is_handler(gan,
+                       batch_size=args['val_batch_size'],
+                       n_samples=args['n_samples_is'],
+                       eval_every=args['compute_is_every'])
+        )
 
         handlers.append(
             fid_handler(gan,
