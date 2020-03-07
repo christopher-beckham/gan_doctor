@@ -26,7 +26,8 @@ SOFTWARE.
 import torch
 from torch import nn
 import torch.nn.functional as F
-from .spectral_normalization import SpectralNorm
+#from .spectral_normalization import SpectralNorm
+from torch.nn.utils.spectral_norm import spectral_norm as SpectralNorm
 import numpy as np
 
 channels = 3
@@ -67,7 +68,7 @@ class ResBlockGenerator(nn.Module):
         self.ups = nn.Upsample(scale_factor=stride)
 
         self.bn2 = nn.BatchNorm2d(out_channels)
-        
+
         bypass = []
         if stride != 1:
             bypass.append(nn.Upsample(scale_factor=stride))
