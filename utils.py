@@ -10,6 +10,8 @@ import glob
 
 from fid_score import calculate_fid_given_imgs
 
+
+
 def find_latest_pkl_in_folder(model_dir):
     # List all the pkl files.
     files = glob.glob("%s/*.pkl" % model_dir)
@@ -80,6 +82,12 @@ def bce_loss(prediction, target):
         loss = loss.cuda()
     return loss(prediction, target)
 
+def hinge_loss_d(real, fake):
+    return torch.mean(torch.nn.ReLU()(1. - real)) + \
+        torch.mean(torch.nn.ReLU()(1. + fake))
+
+def hinge_loss_g(fake):
+    return -torch.mean(fake)
 
 def print_network(net):
     num_params = 0
@@ -117,6 +125,11 @@ def _extract_loader(loader):
     return train_samples
 
 def _extract_samples(gan, batch_size, n_samples, verbose=False):
+
+    print("bs==", batch_size)
+    #import pdb
+    #pdb.set_trace()
+
     '''Extract images from the GAN, and de-norm them
     and convert into int32.
     '''
@@ -125,7 +138,8 @@ def _extract_samples(gan, batch_size, n_samples, verbose=False):
     for _ in range(n_batches):
         if verbose:
             print("iter: ", (_+1), "/", n_batches)
-        samples = gan.sample(batch_size)
+        with torch.no_grad():
+            samples = gan.sample(batch_size)
         if type(samples) == list:
             samples = samples[-1]
         gen_samples.append(samples.cpu())
@@ -135,6 +149,7 @@ def _extract_samples(gan, batch_size, n_samples, verbose=False):
     return gen_samples
 
 def compute_fid(train_samples,
+                n_gan_samples,
                 gan,
                 batch_size,
                 cls,
@@ -144,10 +159,19 @@ def compute_fid(train_samples,
 
     gen_samples = _extract_samples(gan,
                                    batch_size,
-                                   n_samples=len(train_samples))
+                                   n_samples=n_gan_samples)
+
+    assert len(gen_samples) == n_gan_samples
+
     # The method in fid_score.py expects the images to be in
     # [0,1], so scale it here.
     gen_samples = gen_samples*0.5 + 0.5
+
+    print("n samples from test:", len(train_samples))
+    print("n samples from GAN:", len(gen_samples))
+
+    # train_samples is already in [0,1]
+    #train_samples = train_samples*0.5 + 0.5
 
     score = calculate_fid_given_imgs(imgs1=train_samples,
                                      imgs2=gen_samples,
@@ -155,8 +179,43 @@ def compute_fid(train_samples,
                                      cuda=use_cuda,
                                      model=cls)
     return {
-        'fid_mean': np.mean(score)
+        'fid': np.mean(score)
     }
+
+def compute_fid_tf(n_gan_samples,
+                   gan,
+                   batch_size,
+                   verbose=False):
+
+    use_cuda = gan.use_cuda
+
+    import tf.fid as tf_fid
+    import tensorflow as tf
+
+    print("inception fid score...>>>>>>")
+
+    gen_samples = _extract_samples(gan,
+                                   batch_size,
+                                   n_samples=n_gan_samples)
+
+    assert len(gen_samples) == n_gan_samples
+
+    samples_tf = (((gen_samples*0.5)+0.5)*255.).astype(np.uint8)
+    samples_tf = samples_tf.swapaxes(1, 2).swapaxes(2, 3)
+
+    g = tf.Graph()
+    with g.as_default():
+
+        score = tf_fid.calculate_fid_given_imgs(
+            samples_tf,
+            "tf/cifar-10-fid.npz",
+            batch_size=batch_size
+        )
+
+    return {
+        'fid_tf': np.mean(score).astype(np.float64)
+    }
+
 
 
 def compute_is(n_samples,
@@ -185,4 +244,41 @@ def compute_is(n_samples,
     return {
         'is_mean': np.mean(score_mu),
         'is_std': np.std(score_std)
+    }
+
+def compute_is_tf(n_samples,
+                  gan,
+                  batch_size):
+
+    import tf.inception as tf_inception
+    import tensorflow as tf
+
+    print("inception tf score...>>>>>>")
+
+    gen_samples = _extract_samples(gan,
+                                   batch_size,
+                                   n_samples=n_samples)
+
+    assert len(gen_samples) == n_samples
+
+    # The method in fid_score.py expects the images to be in
+    # [0,1], so scale it here.
+    gen_samples = gen_samples*0.5 + 0.5
+
+    print("n samples from GAN:", len(gen_samples))
+
+    # This method expects samples in [0,255]
+    samples_tf = (((gen_samples*0.5)+0.5)*255.).astype(np.uint8)
+    samples_tf = samples_tf.swapaxes(1, 2).swapaxes(2, 3)
+    samples_tf = [ samples_tf[i] for i in range(len(samples_tf)) ]
+
+    g = tf.Graph()
+    with g.as_default():
+        inception_score_mean, inception_score_std = \
+            tf_inception.get_inception_score(samples_tf,
+                                             batch_size=batch_size)
+
+    return {
+        'is_mean_tf': np.mean(inception_score_mean).astype(np.float64),
+        'is_std_tf': np.mean(inception_score_std).astype(np.float64)
     }

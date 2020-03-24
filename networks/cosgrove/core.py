@@ -23,15 +23,15 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+
 import torch
 from torch import nn
 import torch.nn.functional as F
-#from .spectral_normalization import SpectralNorm
+#from .shared.spectral_normalization import SpectralNorm
 from torch.nn.utils.spectral_norm import spectral_norm as SpectralNorm
 import numpy as np
 
 channels = 3
-
 
 class CBN2d(nn.Module):
     def __init__(self, y_dim, bn_f):
@@ -51,6 +51,135 @@ class CBN2d(nn.Module):
         shift = shift.view(shift.size(0), shift.size(1), 1, 1)
         return self.bn(x)*scale + shift
 
+class ResBlockDiscriminator(nn.Module):
+
+    def __init__(self, in_channels, out_channels, stride=1, spec_norm=False):
+        super(ResBlockDiscriminator, self).__init__()
+
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding=1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding=1)
+        nn.init.xavier_uniform(self.conv1.weight.data, 1.)
+        nn.init.xavier_uniform(self.conv2.weight.data, 1.)
+        if spec_norm:
+            self.spec_norm = SpectralNorm
+        else:
+            self.spec_norm = lambda x: x
+
+        if stride == 1:
+            self.model = nn.Sequential(
+                nn.ReLU(True),
+                self.spec_norm(self.conv1),
+                nn.ReLU(True),
+                self.spec_norm(self.conv2)
+            )
+        else:
+            self.model = nn.Sequential(
+                nn.ReLU(True),
+                self.spec_norm(self.conv1),
+                nn.ReLU(True),
+                self.spec_norm(self.conv2),
+                nn.AvgPool2d(2, stride=stride, padding=0)
+            )
+        self.bypass = nn.Sequential()
+        if in_channels != out_channels:
+            self.bypass = nn.Conv2d(in_channels, out_channels, 1, 1, padding=0)
+            nn.init.xavier_uniform(self.bypass.weight.data, np.sqrt(2))
+            self.bypass = self.spec_norm(self.bypass)
+        if stride != 1:
+            self.bypass = nn.Sequential(
+                self.bypass,
+                nn.AvgPool2d(2, stride=stride, padding=0)
+            )
+
+
+    def forward(self, x):
+        return self.model(x) + self.bypass(x)
+
+# special ResBlock just for the first layer of the discriminator
+class FirstResBlockDiscriminator(nn.Module):
+
+    def __init__(self, in_channels, out_channels, stride=1, spec_norm=False):
+        super(FirstResBlockDiscriminator, self).__init__()
+
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding=1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding=1)
+        self.bypass_conv = nn.Conv2d(in_channels, out_channels, 1, 1, padding=0)
+        nn.init.xavier_uniform(self.conv1.weight.data, 1.)
+        nn.init.xavier_uniform(self.conv2.weight.data, 1.)
+        nn.init.xavier_uniform(self.bypass_conv.weight.data, np.sqrt(2))
+
+        if spec_norm:
+            self.spec_norm = SpectralNorm
+        else:
+            self.spec_norm = lambda x: x
+
+        # we don't want to apply ReLU activation to raw image before convolution transformation.
+        self.model = nn.Sequential(
+            self.spec_norm(self.conv1),
+            nn.ReLU(True),
+            self.spec_norm(self.conv2),
+            nn.AvgPool2d(2)
+            )
+        self.bypass = nn.Sequential(
+            nn.AvgPool2d(2),
+            self.spec_norm(self.bypass_conv),
+        )
+
+    def forward(self, x):
+        return self.model(x) + self.bypass(x)
+
+class Discriminator(nn.Module):
+    def __init__(self,
+                 nf,
+                 input_nc=3,
+                 n_out=1,
+                 n_classes=0,
+                 sigmoid=False,
+                 spec_norm=False):
+        """
+        """
+        super(Discriminator, self).__init__()
+
+        if spec_norm:
+            self.spec_norm = SpectralNorm
+        else:
+            self.spec_norm = lambda x : x
+
+        self.model = nn.Sequential(
+            FirstResBlockDiscriminator(input_nc, nf,
+                                       stride=2, spec_norm=spec_norm),
+            ResBlockDiscriminator(nf, nf*2,
+                                  stride=2, spec_norm=spec_norm),
+            ResBlockDiscriminator(nf*2, nf*4,
+                                  stride=2, spec_norm=spec_norm),
+            ResBlockDiscriminator(nf*4, nf*8,
+                                  stride=2, spec_norm=spec_norm),
+            ResBlockDiscriminator(nf*8, nf*8,
+                                  spec_norm=spec_norm),
+            nn.ReLU(True),
+            nn.AdaptiveAvgPool2d(1),
+        )
+        self.fc = nn.Linear(nf*8, n_out)
+        nn.init.xavier_uniform(self.fc.weight.data, 1.)
+        self.fc = self.spec_norm(self.fc)
+
+        if n_classes > 0:
+            self.cls = nn.Linear(nf*8, n_classes)
+            nn.init.xavier_uniform(self.cls.weight.data, 1.)
+            self.cls = self.spec_norm(self.cls)
+        else:
+            self.cls = None
+
+        self.sigmoid = sigmoid
+
+    def forward(self, x):
+        x = self.model(x)
+        x = x.view(-1, x.size(1))
+        result = self.fc(x)
+        if self.sigmoid:
+            result = F.sigmoid(result)
+        return result
+
 class ResBlockGenerator(nn.Module):
 
     def __init__(self, in_channels, out_channels, stride=1):
@@ -68,7 +197,7 @@ class ResBlockGenerator(nn.Module):
         self.ups = nn.Upsample(scale_factor=stride)
 
         self.bn2 = nn.BatchNorm2d(out_channels)
-
+        
         bypass = []
         if stride != 1:
             bypass.append(nn.Upsample(scale_factor=stride))
@@ -119,121 +248,3 @@ class Generator(nn.Module):
         x = self.final(x)
         x = self.tanh(x)
         return x
-    
-class ResBlockDiscriminator(nn.Module):
-
-    def __init__(self, in_channels, out_channels, stride=1, spec_norm=False):
-        super(ResBlockDiscriminator, self).__init__()
-
-        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding=1)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding=1)
-        nn.init.xavier_uniform(self.conv1.weight.data, 1.)
-        nn.init.xavier_uniform(self.conv2.weight.data, 1.)
-        if spec_norm:
-            self.spec_norm = SpectralNorm
-        else:
-            self.spec_norm = lambda x: x
-
-        if stride == 1:
-            self.model = nn.Sequential(
-                nn.ReLU(),
-                self.spec_norm(self.conv1),
-                nn.ReLU(),
-                self.spec_norm(self.conv2)
-            )
-        else:
-            self.model = nn.Sequential(
-                nn.ReLU(),
-                self.spec_norm(self.conv1),
-                nn.ReLU(),
-                self.spec_norm(self.conv2),
-                nn.AvgPool2d(2, stride=stride, padding=0)
-            )
-        self.bypass = nn.Sequential()
-        if stride != 1:
-
-            self.bypass_conv = nn.Conv2d(in_channels, out_channels, 1, 1, padding=0)
-            nn.init.xavier_uniform(self.bypass_conv.weight.data, np.sqrt(2))
-
-            self.bypass = nn.Sequential(
-                self.spec_norm(self.bypass_conv),
-                nn.AvgPool2d(2, stride=stride, padding=0)
-            )
-
-
-    def forward(self, x):
-        return self.model(x) + self.bypass(x)
-
-# special ResBlock just for the first layer of the discriminator
-class FirstResBlockDiscriminator(nn.Module):
-
-    def __init__(self, in_channels, out_channels, stride=1, spec_norm=False):
-        super(FirstResBlockDiscriminator, self).__init__()
-
-        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding=1)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding=1)
-        self.bypass_conv = nn.Conv2d(in_channels, out_channels, 1, 1, padding=0)
-        nn.init.xavier_uniform(self.conv1.weight.data, 1.)
-        nn.init.xavier_uniform(self.conv2.weight.data, 1.)
-        nn.init.xavier_uniform(self.bypass_conv.weight.data, np.sqrt(2))
-
-        if spec_norm:
-            self.spec_norm = SpectralNorm
-        else:
-            self.spec_norm = lambda x: x
-
-        # we don't want to apply ReLU activation to raw image before convolution transformation.
-        self.model = nn.Sequential(
-            self.spec_norm(self.conv1),
-            nn.ReLU(),
-            self.spec_norm(self.conv2),
-            nn.AvgPool2d(2)
-            )
-        self.bypass = nn.Sequential(
-            nn.AvgPool2d(2),
-            self.spec_norm(self.bypass_conv),
-        )
-
-    def forward(self, x):
-        return self.model(x) + self.bypass(x)
-
-
-class Discriminator(nn.Module):
-    def __init__(self, nf,
-                 sigmoid=False,
-                 spec_norm=False):
-        super(Discriminator, self).__init__()
-
-        if spec_norm:
-            self.spec_norm = SpectralNorm
-        else:
-            self.spec_norm = lambda x : x
-
-        self.model = nn.Sequential(
-            FirstResBlockDiscriminator(channels, nf,
-                                       stride=2, spec_norm=spec_norm),
-            ResBlockDiscriminator(nf, nf,
-                                  stride=2, spec_norm=spec_norm),
-            ResBlockDiscriminator(nf, nf,
-                                  spec_norm=spec_norm),
-            ResBlockDiscriminator(nf, nf,
-                                  spec_norm=spec_norm),
-            #ResBlockDiscriminator(nf*8, nf*16,
-            #                      spec_norm=spec_norm),
-            nn.ReLU(),
-            nn.AvgPool2d(8),
-        )
-        self.fc = nn.Linear(nf, 1)
-        nn.init.xavier_uniform(self.fc.weight.data, 1.)
-        self.fc = self.spec_norm(self.fc)
-
-        self.sigmoid = sigmoid
-
-    def forward(self, x):
-        x = self.model(x)
-        x = x.view(-1, x.size(1))
-        result = self.fc(x)
-        if self.sigmoid:
-            return F.sigmoid(result)
-        else:
-            return result

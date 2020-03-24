@@ -270,6 +270,9 @@ def calculate_fid_given_imgs(imgs1, imgs2, batch_size, cuda, dims=2048, model=No
         if cuda:
             model = model.cuda()
 
+    assert imgs1.min() >= 0. and imgs1.max() <= 1.
+    assert imgs2.min() >= 0. and imgs2.max() <= 1.
+
     m1, s1 = calculate_activation_statistics(imgs1, model, batch_size,
                                              dims, cuda, verbose=False)
     m2, s2 = calculate_activation_statistics(imgs2, model, batch_size,

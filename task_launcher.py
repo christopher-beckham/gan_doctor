@@ -9,7 +9,8 @@ import random
 import string
 from skimage.io import imsave
 from importlib import import_module
-from torch.utils.data import DataLoader
+from torch.utils.data import (DataLoader,
+                              Subset)
 from utils import (generate_name_from_args,
                    find_latest_pkl_in_folder,
                    count_params)
@@ -17,6 +18,13 @@ from handlers import (fid_handler,
                       is_handler,
                       dump_img_handler)
 from torchvision.utils import save_image
+
+use_shuriken = False
+try:
+    from shuriken.utils import get_hparams
+    use_shuriken = True
+except:
+    print("WARNING: tried to import Shuriken but failed")
 
 
 if __name__ == '__main__':
@@ -47,6 +55,7 @@ if __name__ == '__main__':
         parser.add_argument('--disc', type=str, default="networks/cosgrove/disc.py")
         parser.add_argument('--gen_args', type=str, default=None)
         parser.add_argument('--disc_args', type=str, default=None)
+        parser.add_argument('--subset_train', type=int, default=None)
 
         parser.add_argument('--save_path', type=str, default=None)
         parser.add_argument('--save_images_every', type=int, default=100)
@@ -55,8 +64,11 @@ if __name__ == '__main__':
         parser.add_argument('--num_workers', type=int, default=4)
         parser.add_argument('--compute_is_every', type=int, default=1)
         parser.add_argument('--n_samples_is', type=int, default=5000)
+        parser.add_argument('--use_tf_metrics', action='store_true')
         parser.add_argument('--seed', type=int, default=0)
-        parser.add_argument('--mode', type=str, choices=['train', 'pdb'],
+        parser.add_argument('--mode', type=str, choices=['train',
+                                                         'eval_is_tf',
+                                                         'eval_fid_tf'],
                             default='train')
         args = parser.parse_args()
         return args
@@ -64,13 +76,27 @@ if __name__ == '__main__':
     args = parse_args()
     args = vars(args)
 
-    if args['trial_id'] is None and 'SLURM_JOB_ID' in os.environ:
-        print("SLURM_JOB_ID found so injecting this into `trial_id`...")
-        args['trial_id'] = os.environ['SLURM_JOB_ID']
+    if use_shuriken:
+        shk_args = get_hparams()
+        print("Args passed from Shk:", shk_args)
+        for key in shk_args:
+            #if key not in KWARGS_FOR_NAME:
+            #    raise Exception("Shuriken-supplied HP %s is unknown" % key)
+            if shk_args[key] == '':
+                shk_args[key] = True
+        args.update(shk_args)
 
-    if args['name'] is None:
-        print("args.name is null so generating a random name...")
-        args['name'] = "".join([ random.choice(string.ascii_letters[0:26]) for j in range(6) ])
+    if args['trial_id'] is None and 'SHK_TRIAL_ID' in os.environ:
+        print("SHK_TRIAL_ID found so injecting this into `trial_id`...")
+        args['trial_id'] = os.environ['SHK_TRIAL_ID']
+
+    if args['name'] is None and 'SHK_EXPERIMENT_ID' in os.environ:
+        print("SHK_EXPERIMENT_ID found so injecting this into `name`...")
+        args['name'] = os.environ['SHK_EXPERIMENT_ID']
+
+    if 'EAI_SEED' in os.environ:
+        print("EAI_SEED found so overriding args.seed...")
+        args['seed'] = int(os.environ['EAI_SEED'])
 
     print("** ARGUMENTS **")
     print("  " + yaml.dump(args).replace("\n", "\n  "))
@@ -115,17 +141,34 @@ if __name__ == '__main__':
 
     module_gan = import_module(args['gan'].replace("/", ".").\
                                replace(".py", ""))
-    gan_class = module_gan.GAN
+    gan_class = module_gan.get_class()
 
     module_dataset = import_module(args['dataset'].replace("/", ".").\
                                    replace(".py", ""))
-    dataset = module_dataset.get_dataset(img_size=args['img_size'])
-    loader = DataLoader(dataset,
-                        shuffle=True,
-                        batch_size=args['batch_size'],
-                        num_workers=args['num_workers'])
 
+    # Load training set.
+    dataset_train = module_dataset.get_dataset_train(img_size=args['img_size'])
+    # Load test set (for IS/FID calculation)
+    dataset_test = module_dataset.get_dataset_test(img_size=args['img_size'])
 
+    if args['subset_train'] is not None:
+        # The subset is randomly sampled from the
+        # training data, and changes depending on
+        # the seed.
+        indices = np.arange(0, args['subset_train'])
+        rs = np.random.RandomState(args['seed'])
+        rs.shuffle(indices)
+        indices = indices[0:args['subset_train']]
+        dataset_train = Subset(dataset_train, indices=indices)
+
+    loader_train = DataLoader(dataset_train,
+                              shuffle=True,
+                              batch_size=args['batch_size'],
+                              num_workers=args['num_workers'])
+    loader_test = DataLoader(dataset_test,
+                             shuffle=False,
+                             batch_size=args['val_batch_size'],
+                             num_workers=0)
 
     # TODO: support different optim flags
     # for opt_g and opt_d
@@ -154,18 +197,16 @@ if __name__ == '__main__':
     print("d optim")
     print(gan.optim['d'])
 
-    loader_handler = DataLoader(
-        dataset,
-        shuffle=True,
-        batch_size=args['val_batch_size']
-    )
-
     if args['compute_is_every'] > 0:
+
+        use_tf = args['use_tf_metrics']
 
         print("IS/FID handler: bs=%i, n_samples=%i" % \
               (args['val_batch_size'], args['n_samples_is']))
+
         handlers.append(
             is_handler(gan,
+                       use_tf=use_tf,
                        batch_size=args['val_batch_size'],
                        n_samples=args['n_samples_is'],
                        eval_every=args['compute_is_every'])
@@ -174,9 +215,10 @@ if __name__ == '__main__':
         handlers.append(
             fid_handler(gan,
                         cls=None,
+                        use_tf=use_tf,
                         batch_size=args['val_batch_size'],
                         n_samples=args['n_samples_is'],
-                        loader=loader_handler,
+                        loader=loader_test,
                         eval_every=args['compute_is_every'])
         )
 
@@ -192,8 +234,11 @@ if __name__ == '__main__':
     if not os.path.exists(expt_path):
         os.makedirs(expt_path)
 
+    with open("%s/cfg.yaml" % expt_path, "w") as f:
+        f.write(yaml.dump(args))
+
     # Dump some test images.
-    x, _ = iter(loader).next()
+    x, _ = iter(loader_train).next()
     save_image(x*0.5 + 0.5, "%s/real_samples.png" % (expt_path))
 
     if args['resume'] is not None:
@@ -235,9 +280,47 @@ if __name__ == '__main__':
 
     if args['mode'] == 'train':
         gan.train(
-            itr=loader,
+            itr=loader_train,
             epochs=args['epochs'],
             model_dir=expt_path,
             result_dir=expt_path,
             save_every=args['save_every']
         )
+    elif args['mode'] == 'eval_is_tf':
+
+        from utils import compute_is_tf
+
+        gan._eval()
+
+        test_samples = []
+        for b, (x_batch, _) in enumerate(loader_test):
+            test_samples.append(x_batch.numpy())
+        test_samples = np.vstack(test_samples)
+
+        dd = compute_is_tf(500,
+                           gan,
+                           args['val_batch_size'])
+
+    elif args['mode'] == 'eval_fid_tf':
+
+        from utils import compute_fid_tf
+
+        gan._eval()
+
+        # NOTE: this one actually uses precomputed
+        # FIDs (on train/test/both?) internally
+        # in an npz file, so no need to extract
+        # test examples here.
+        #test_samples = []
+        #for b, (x_batch, _) in enumerate(loader_test):
+        #    test_samples.append(x_batch.numpy())
+        #test_samples = np.vstack(test_samples)
+
+        dd = compute_fid_tf(n_gan_samples=500,
+                            gan=gan,
+                            batch_size=args['val_batch_size'])
+
+        print(dd)
+
+    else:
+        raise Exception("")

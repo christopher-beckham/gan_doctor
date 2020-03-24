@@ -3,11 +3,17 @@ from torch import nn
 import numpy as np
 from torchvision.utils import save_image
 from .base import GAN as Base
-from utils import bce_loss
+from utils import (bce_loss,
+                   hinge_loss_g,
+                   hinge_loss_d)
 
 class GAN(Base):
 
     def __init__(self, *args, **kwargs):
+        self.loss_name = kwargs.pop('loss', 'bce')
+        if self.loss_name not in ['bce', 'hinge']:
+            raise Exception("loss needs to be either `bce` or `hinge`")
+        print("Using loss: %s" % self.loss_name)
         super(GAN, self).__init__(*args, **kwargs)
 
     def prepare_batch(self, batch):
@@ -42,7 +48,11 @@ class GAN(Base):
         self.optim['g'].zero_grad()
         fake = self.g(z)
         d_fake = self.d(fake)
-        gen_loss = bce_loss(d_fake, 1)
+
+        if self.loss_name == 'bce':
+            gen_loss = bce_loss(d_fake, 1)
+        else:
+            gen_loss = hinge_loss_g(d_fake)
         if (kwargs['iter']-1) % self.update_g_every == 0:
             gen_loss.backward()
             self.optim['g'].step()
@@ -50,7 +60,10 @@ class GAN(Base):
         self.optim['d'].zero_grad()
         d_fake = self.d(fake.detach())
         d_real = self.d(x)
-        d_loss = bce_loss(d_real, 1) + bce_loss(d_fake, 0)
+        if self.loss_name == 'bce':
+            d_loss = bce_loss(d_real, 1) + bce_loss(d_fake, 0)
+        else:
+            d_loss = hinge_loss_d(d_real, d_fake)
         d_loss.backward()
         self.optim['d'].step()
         losses = {
@@ -62,3 +75,6 @@ class GAN(Base):
             'gz': fake.detach(),
         }
         return losses, outputs
+
+def get_class():
+    return GAN
